@@ -238,11 +238,8 @@ function safeUser() {
   }
 }
 
-// Use the same-origin /api path.
-// Vercel production rewrites /api/* to the production backend,
-// while Vite proxies /api/* to localhost:8000 during local development.
-// This prevents stale VITE_API_BASE_URL values from breaking registration.
-const API_BASE_URL = "";
+// Empty = same-origin /api (Vite proxy in dev, vercel.json rewrite in prod). Set VITE_API_BASE_URL only for a cross-origin backend (needs CORS_ORIGINS on the API).
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 const API_TOKEN_KEY = "statSkillApiToken";
 const API_REFRESH_MS = 15000;
 
@@ -442,6 +439,26 @@ function runCompetencyEngine(data=KARMAYOGI_DATA){
    login returns the full data snapshot for that user. The client refreshes
    that snapshot periodically so JSON changes propagate to every page.
 */
+async function apiRequest(path, options = {}) {
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, { cache: "no-store", ...options });
+  } catch (err) {
+    // fetch only throws on network-level failure (backend down, blocked, wrong URL)
+    throw new Error("Cannot reach the server. The backend may be down or misconfigured (check the /api rewrite in vercel.json and that the backend is deployed).");
+  }
+  const text = await response.text();
+  let payload = {};
+  try { payload = text ? JSON.parse(text) : {}; } catch { payload = { raw: text }; }
+  if (!response.ok) {
+    const detail = typeof payload?.detail === "string" ? payload.detail
+      : Array.isArray(payload?.detail) ? payload.detail.map(d => d.msg).join(", ")
+      : null;
+    throw new Error(detail || `Server error ${response.status}.${payload.raw ? " The backend returned a non-JSON response (likely a crash or Vercel error page)." : ""}`);
+  }
+  return payload;
+}
+
 async function apiLogin(email, password){
   const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
     method:"POST",
@@ -455,15 +472,11 @@ async function apiLogin(email, password){
 }
 
 async function apiRegister({ name, email, password }) {
-  const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
+  return apiRequest("/api/auth/register", {
     method: "POST",
     headers: { "Content-Type": "application/json", "Accept": "application/json" },
-    body: JSON.stringify({ name: name.trim(), email: email.trim(), password }),
-    cache: "no-store"
+    body: JSON.stringify({ name: name.trim(), email: email.trim().toLowerCase(), password })
   });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload?.detail || "Unable to create account.");
-  return payload;
 }
 
 async function apiFetchMe(token){
@@ -997,6 +1010,7 @@ export default function App() {
     try {
       const result = await apiLogin(email.trim(), password);
       const token = result.access_token;
+      if (!token) throw new Error("Server returned no session token.");
       localStorage.setItem(API_TOKEN_KEY, token);
       localStorage.setItem("statSkillSession", "active");
       setApiToken(token);
@@ -1013,15 +1027,17 @@ export default function App() {
     try {
       const result = await apiRegister(data);
       const token = result.access_token;
+      if (!token) throw new Error("Registration succeeded but the server returned no session token. Please sign in.");
       localStorage.setItem(API_TOKEN_KEY, token);
       localStorage.setItem("statSkillSession", "active");
       setApiToken(token);
-      applyApiSnapshot(result.data);
+      applyApiSnapshot(result.data || result);
       setLoggedIn(true);
       setRegister(false);
       setActive("Dashboard");
     } catch (error) {
       alert(error.message || "Unable to create account.");
+      throw error;
     }
   };
 
