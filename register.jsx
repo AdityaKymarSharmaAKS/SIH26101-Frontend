@@ -8,7 +8,8 @@ import {
   ArrowRight,
   BarChart3,
   UserPlus
-} from "lucide-react";
+}
+from "lucide-react";
 import "./register.css";
 import "./auth-themes.css";
 
@@ -23,6 +24,7 @@ export default function Register({ onRegister, onBackToLogin }) {
   }, []);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const [formData, setFormData] = useState({
     name: "",
@@ -38,7 +40,7 @@ export default function Register({ onRegister, onBackToLogin }) {
     });
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
     if (
@@ -61,9 +63,14 @@ export default function Register({ onRegister, onBackToLogin }) {
       return;
     }
 
-    // Registration successful
-    if (onRegister) {
-      onRegister(formData);
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      if (onRegister) await onRegister(formData);
+    } catch {
+      // error already shown by the parent handler
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -253,10 +260,11 @@ export default function Register({ onRegister, onBackToLogin }) {
             <button
               type="submit"
               className="register-submit-button"
+              disabled={submitting}
             >
               <UserPlus size={19} />
 
-              <span>Create Account</span>
+              <span>{submitting ? "Creating..." : "Create Account"}</span>
 
               <ArrowRight size={20} />
 
